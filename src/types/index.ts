@@ -63,6 +63,50 @@ export interface LogEntry {
   timestamp: number
 }
 
+/** Stats recorded when an enemy is defeated */
+export interface DefeatedEnemy {
+  enemy: EnemyCard
+  /** Whether the enemy was captured (exact kill) */
+  captured: boolean
+  /** Total damage dealt to this enemy across all turns */
+  totalDamageDealt: number
+  /** Total shield accumulated during this fight */
+  totalShieldUsed: number
+  /** Number of turns taken to defeat this enemy */
+  turnsToDefeat: number
+}
+
+/** Toast notification data */
+export interface ToastData {
+  message: string
+  type: 'defeat' | 'capture' | 'info'
+  visible: boolean
+}
+
+/**
+ * A snapshot of game state for the undo system.
+ * Contains all mutable game state needed to restore a point in time.
+ */
+export interface GameSnapshot {
+  phase: GamePhase
+  turnStep: TurnStep
+  castleDeck: EnemyCard[]
+  tavernDeck: Card[]
+  discardPile: Card[]
+  currentEnemy: EnemyCard | null
+  playerHand: Card[]
+  jesterHand: JesterCard[]
+  currentPlay: PlayedCards | null
+  shieldTotal: number
+  immunityBroken: boolean
+  log: LogEntry[]
+  logCounter: number
+  heartsHealAmount: number
+  defeatedEnemies: DefeatedEnemy[]
+  turnsAgainstCurrentEnemy: number
+  damageToCurrentEnemy: number
+}
+
 export interface GameState {
   phase: GamePhase
   turnStep: TurnStep
@@ -89,6 +133,17 @@ export interface GameState {
 
   // Hearts healing selection state
   heartsHealAmount: number
+
+  // Defeated enemies tracking
+  defeatedEnemies: DefeatedEnemy[]
+  turnsAgainstCurrentEnemy: number
+  damageToCurrentEnemy: number
+
+  // Undo history (persisted)
+  undoStack: GameSnapshot[]
+
+  // Toast notification (UI state)
+  toast: ToastData
 }
 
 // === Constants ===

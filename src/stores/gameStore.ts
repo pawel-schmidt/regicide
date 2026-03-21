@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
+import { toRaw } from 'vue'
 import type {
   GamePhase, TurnStep, Card, EnemyCard, JesterCard,
-  PlayedCards, LogEntry, Suit,
+  PlayedCards, LogEntry, Suit, DefeatedEnemy, ToastData, GameSnapshot,
 } from '../types'
 import { HAND_SIZES } from '../types'
 import {
@@ -15,6 +16,8 @@ import {
   getEffectiveAttack, isValidDamageDiscard, canSurviveAttack,
   isGameWon, canYield,
 } from '../utils/rules'
+
+const MAX_UNDO_STACK = 20
 
 interface GameStoreState {
   phase: GamePhase
@@ -38,7 +41,18 @@ interface GameStoreState {
 
   heartsHealAmount: number
 
-  // UI selection state (not persisted game logic, but helpful)
+  // Defeated enemies tracking
+  defeatedEnemies: DefeatedEnemy[]
+  turnsAgainstCurrentEnemy: number
+  damageToCurrentEnemy: number
+
+  // Undo history (persisted)
+  undoStack: GameSnapshot[]
+
+  // Toast notification (transient UI state)
+  toast: ToastData
+
+  // UI selection state
   selectedCardIds: string[]
   selectedJester: boolean
 }
@@ -65,6 +79,14 @@ export const useGameStore = defineStore('game', {
     logCounter: 0,
 
     heartsHealAmount: 0,
+
+    defeatedEnemies: [],
+    turnsAgainstCurrentEnemy: 0,
+    damageToCurrentEnemy: 0,
+
+    undoStack: [],
+
+    toast: { message: '', type: 'info', visible: false },
 
     selectedCardIds: [],
     selectedJester: false,
@@ -101,7 +123,11 @@ export const useGameStore = defineStore('game', {
     },
 
     enemiesDefeated(state): number {
-      return 12 - state.castleDeck.length - (state.currentEnemy ? 1 : 0)
+      return state.defeatedEnemies.length
+    },
+
+    canUndo(state): boolean {
+      return state.undoStack.length > 0 && state.phase === 'playing'
     },
   },
 
@@ -122,6 +148,79 @@ export const useGameStore = defineStore('game', {
       }
     },
 
+    // === Toast ===
+
+    showToast(message: string, type: ToastData['type'] = 'info') {
+      this.toast = { message, type, visible: true }
+    },
+
+    hideToast() {
+      this.toast.visible = false
+    },
+
+    // === Undo System ===
+
+    /** Take a snapshot of current game state and push to undo stack */
+    pushSnapshot() {
+      // Deep clone reactive state using JSON round-trip (toRaw unwraps Vue proxies)
+      const clone = <T>(val: T): T => JSON.parse(JSON.stringify(toRaw(val)))
+
+      const snapshot: GameSnapshot = {
+        phase: this.phase,
+        turnStep: this.turnStep,
+        castleDeck: clone(this.castleDeck),
+        tavernDeck: clone(this.tavernDeck),
+        discardPile: clone(this.discardPile),
+        currentEnemy: this.currentEnemy ? clone(this.currentEnemy) : null,
+        playerHand: clone(this.playerHand),
+        jesterHand: clone(this.jesterHand),
+        currentPlay: this.currentPlay ? clone(this.currentPlay) : null,
+        shieldTotal: this.shieldTotal,
+        immunityBroken: this.immunityBroken,
+        log: clone(this.log),
+        logCounter: this.logCounter,
+        heartsHealAmount: this.heartsHealAmount,
+        defeatedEnemies: clone(this.defeatedEnemies),
+        turnsAgainstCurrentEnemy: this.turnsAgainstCurrentEnemy,
+        damageToCurrentEnemy: this.damageToCurrentEnemy,
+      }
+
+      this.undoStack.push(snapshot)
+
+      // Cap the stack size
+      if (this.undoStack.length > MAX_UNDO_STACK) {
+        this.undoStack = this.undoStack.slice(-MAX_UNDO_STACK)
+      }
+    },
+
+    /** Restore state from the last snapshot */
+    undo() {
+      if (this.undoStack.length === 0) return
+
+      const snapshot = this.undoStack.pop()!
+
+      this.phase = snapshot.phase
+      this.turnStep = snapshot.turnStep
+      this.castleDeck = snapshot.castleDeck
+      this.tavernDeck = snapshot.tavernDeck
+      this.discardPile = snapshot.discardPile
+      this.currentEnemy = snapshot.currentEnemy
+      this.playerHand = snapshot.playerHand
+      this.jesterHand = snapshot.jesterHand
+      this.currentPlay = snapshot.currentPlay
+      this.shieldTotal = snapshot.shieldTotal
+      this.immunityBroken = snapshot.immunityBroken
+      this.log = snapshot.log
+      this.logCounter = snapshot.logCounter
+      this.heartsHealAmount = snapshot.heartsHealAmount
+      this.defeatedEnemies = snapshot.defeatedEnemies
+      this.turnsAgainstCurrentEnemy = snapshot.turnsAgainstCurrentEnemy
+      this.damageToCurrentEnemy = snapshot.damageToCurrentEnemy
+
+      this.clearSelection()
+      this.addLog('Action undone.', 'system')
+    },
+
     // === Game Setup ===
 
     startNewGame(playerCount: number = 1) {
@@ -138,6 +237,11 @@ export const useGameStore = defineStore('game', {
       this.selectedJester = false
       this.log = []
       this.logCounter = 0
+      this.defeatedEnemies = []
+      this.turnsAgainstCurrentEnemy = 0
+      this.damageToCurrentEnemy = 0
+      this.undoStack = []
+      this.toast = { message: '', type: 'info', visible: false }
 
       // Create decks
       this.tavernDeck = createTavernDeck()
@@ -172,10 +276,12 @@ export const useGameStore = defineStore('game', {
       this.castleDeck = this.castleDeck.slice(1)
       this.shieldTotal = 0
       this.immunityBroken = false
+      this.turnsAgainstCurrentEnemy = 0
+      this.damageToCurrentEnemy = 0
 
       const enemy = this.currentEnemy
       this.addLog(
-        `A ${enemy.rank} of ${enemy.suit} appears! (${enemy.health}HP, ${enemy.attack}ATK)`,
+        `A ${rankTitle(enemy.rank)} of ${enemy.suit} appears! (${enemy.health}HP, ${enemy.attack}ATK)`,
         'enemy'
       )
     },
@@ -211,6 +317,9 @@ export const useGameStore = defineStore('game', {
 
       if (!isValidPlay(cards, jester)) return
 
+      // Snapshot before any state changes
+      this.pushSnapshot()
+
       // Handle Jester play
       if (jester && cards.length === 0) {
         this.jesterHand = this.jesterHand.filter(j => j.id !== jester.id)
@@ -224,9 +333,9 @@ export const useGameStore = defineStore('game', {
         }
         this.addLog('Jester played! Enemy immunity broken.', 'action')
         this.clearSelection()
+        this.turnsAgainstCurrentEnemy++
 
         // Jester does 0 damage, skip to suffer damage
-        // But first check if enemy attack is 0 (fully shielded)
         this.turnStep = 'suffer_damage'
         this.checkAutoSufferDamage()
         return
@@ -240,14 +349,11 @@ export const useGameStore = defineStore('game', {
       const playedIds = new Set(cards.map(c => c.id))
       this.playerHand = this.playerHand.filter(c => !playedIds.has(c.id))
 
-      // NOTE: Do NOT add played cards to discard yet.
-      // Hearts healing should not be able to recover just-played cards.
-      // We store them temporarily and add to discard after suit powers resolve.
-
       const cardDesc = cards.map(c => `${c.rank}${suitSymbol(c.suit)}`).join(' + ')
       this.addLog(`Played ${cardDesc} (Attack: ${play.totalAttack})`, 'action')
 
       this.clearSelection()
+      this.turnsAgainstCurrentEnemy++
 
       // Move to suit power activation
       this.turnStep = 'activate_power'
@@ -295,10 +401,7 @@ export const useGameStore = defineStore('game', {
         this.addLog(`${suitSymbol(suit)} power blocked by immunity!`, 'system')
       }
 
-      // If hearts needs player input, we stay in activate_power
-      // Otherwise move to deal damage
       if (this.heartsHealAmount > 0 && this.discardPile.length > 0) {
-        // Hearts healing is auto in solo - just heal the max amount
         this.autoHealHearts()
       }
 
@@ -341,9 +444,7 @@ export const useGameStore = defineStore('game', {
 
       const healCount = Math.min(this.heartsHealAmount, this.discardPile.length)
       if (healCount > 0) {
-        // Take from end of discard pile (most recently discarded, before this turn's cards)
         const healed = this.discardPile.splice(-healCount, healCount)
-        // Shuffle the healed cards before placing at bottom of tavern deck
         shuffle(healed)
         this.tavernDeck.push(...healed)
         this.addLog(`Hearts: Returned ${healCount} card(s) to tavern deck`, 'heal')
@@ -359,6 +460,7 @@ export const useGameStore = defineStore('game', {
       const damage = this.currentPlay.totalAttack
       if (damage > 0) {
         this.currentEnemy = applyDamage(this.currentEnemy, damage)
+        this.damageToCurrentEnemy += damage
         this.addLog(
           `Dealt ${damage} damage! Enemy health: ${Math.max(0, this.currentEnemy.health)}/${this.currentEnemy.maxHealth}`,
           'damage'
@@ -367,19 +469,39 @@ export const useGameStore = defineStore('game', {
 
       // Check if enemy is defeated
       if (isEnemyDefeated(this.currentEnemy)) {
-        if (isExactKill(this.currentEnemy)) {
-          // Captured! Enemy goes on top of tavern deck as a playable card
+        const captured = isExactKill(this.currentEnemy)
+
+        // Record defeated enemy with stats
+        const defeated: DefeatedEnemy = {
+          enemy: JSON.parse(JSON.stringify(toRaw(this.currentEnemy))),
+          captured,
+          totalDamageDealt: this.damageToCurrentEnemy,
+          totalShieldUsed: this.shieldTotal,
+          turnsToDefeat: this.turnsAgainstCurrentEnemy,
+        }
+        // Set health to 0 for display consistency
+        defeated.enemy.health = 0
+        this.defeatedEnemies.push(defeated)
+
+        if (captured) {
           this.addLog(
-            `Exact kill! ${this.currentEnemy.rank} of ${this.currentEnemy.suit} captured!`,
+            `Exact kill! ${rankTitle(this.currentEnemy.rank)} of ${this.currentEnemy.suit} captured!`,
             'enemy'
           )
-          // Convert enemy to a high-value card and add to tavern top
           const capturedCard = enemyToCard(this.currentEnemy)
           this.tavernDeck.unshift(capturedCard)
+          this.showToast(
+            `${rankTitle(this.currentEnemy.rank)} ${suitSymbol(this.currentEnemy.suit)} Captured!`,
+            'capture'
+          )
         } else {
           this.addLog(
-            `${this.currentEnemy.rank} of ${this.currentEnemy.suit} defeated!`,
+            `${rankTitle(this.currentEnemy.rank)} of ${this.currentEnemy.suit} defeated!`,
             'enemy'
+          )
+          this.showToast(
+            `${rankTitle(this.currentEnemy.rank)} ${suitSymbol(this.currentEnemy.suit)} Defeated!`,
+            'defeat'
           )
         }
 
@@ -390,7 +512,6 @@ export const useGameStore = defineStore('game', {
         // Reveal next enemy
         this.revealNextEnemy()
 
-        // Check win
         if (this.phase === 'won') return
 
         return
@@ -414,7 +535,6 @@ export const useGameStore = defineStore('game', {
         return
       }
 
-      // Check if player can survive
       if (!canSurviveAttack(this.playerHand, effectiveAtk)) {
         this.addLog(
           `Cannot survive ${effectiveAtk} damage! Game Over.`,
@@ -424,8 +544,6 @@ export const useGameStore = defineStore('game', {
         return
       }
 
-      // Player needs to select cards to discard
-      // The UI will handle this
       this.addLog(
         `Must discard cards totaling ${effectiveAtk}+ to survive!`,
         'damage'
@@ -440,10 +558,12 @@ export const useGameStore = defineStore('game', {
       const discardedCards = this.playerHand.filter(c => discardedCardIds.includes(c.id))
 
       if (!isValidDamageDiscard(discardedCards, effectiveAtk)) {
-        return // Invalid discard, UI should prevent this
+        return
       }
 
-      // Remove discarded cards from hand
+      // Snapshot before discard (allows undoing the discard selection)
+      this.pushSnapshot()
+
       const discardedSet = new Set(discardedCardIds)
       this.playerHand = this.playerHand.filter(c => !discardedSet.has(c.id))
       this.discardPile.push(...discardedCards)
@@ -464,8 +584,9 @@ export const useGameStore = defineStore('game', {
       if (!this.currentEnemy) return
       if (!canYield(this.tavernDeck.length, this.playerHand)) return
 
-      // In solo, yielding means you draw a card from tavern if possible,
-      // then suffer enemy attack
+      // Snapshot before yield
+      this.pushSnapshot()
+
       const handLimit = HAND_SIZES[this.playerCount] ?? 8
       if (this.tavernDeck.length > 0 && this.playerHand.length < handLimit) {
         const [drawn, remaining] = drawCards(this.tavernDeck, 1)
@@ -476,6 +597,7 @@ export const useGameStore = defineStore('game', {
         this.addLog('Yielded turn. No cards to draw.', 'action')
       }
 
+      this.turnsAgainstCurrentEnemy++
       this.currentPlay = null
       this.turnStep = 'suffer_damage'
       this.checkAutoSufferDamage()
@@ -486,15 +608,21 @@ export const useGameStore = defineStore('game', {
     finishTurn() {
       this.currentPlay = null
       this.turnStep = 'play_cards'
-      // Jester immunity break only lasts for the turn it was played
       this.immunityBroken = false
 
-      // Check if player has no cards and tavern is empty
       if (this.playerHand.length === 0 && this.tavernDeck.length === 0 && this.jesterHand.length === 0) {
         this.addLog('No cards left! Game Over.', 'system')
         this.phase = 'lost'
         return
       }
+    },
+
+    // === Navigation ===
+
+    /** Save current game and return to menu. Game data is preserved for resume. */
+    returnToMenu() {
+      this.phase = 'setup'
+      this.clearSelection()
     },
 
     // === Reset ===
@@ -504,7 +632,17 @@ export const useGameStore = defineStore('game', {
     },
   },
 
-  persist: true,
+  persist: {
+    pick: [
+      'phase', 'turnStep', 'playerCount',
+      'castleDeck', 'tavernDeck', 'discardPile',
+      'currentEnemy', 'playerHand', 'jesterHand',
+      'currentPlay', 'shieldTotal', 'immunityBroken',
+      'log', 'logCounter', 'heartsHealAmount',
+      'defeatedEnemies', 'turnsAgainstCurrentEnemy', 'damageToCurrentEnemy',
+      'undoStack',
+    ],
+  },
 })
 
 // === Helpers ===
@@ -516,10 +654,15 @@ function suitSymbol(suit: Suit): string {
   return symbols[suit]
 }
 
-/**
- * Convert a defeated enemy card to a playable card for the tavern deck.
- * J=10, Q=15, K=20 attack value when played.
- */
+function rankTitle(rank: string): string {
+  switch (rank) {
+    case 'J': return 'Jack'
+    case 'Q': return 'Queen'
+    case 'K': return 'King'
+    default: return rank
+  }
+}
+
 function enemyToCard(enemy: EnemyCard): Card {
   return {
     id: `captured-${enemy.id}`,

@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import EnemyDisplay from './EnemyDisplay.vue'
 import PlayerHand from './PlayerHand.vue'
 import GameStats from './GameStats.vue'
 import LogComponent from './LogComponent.vue'
 import GameOverScreen from './GameOverScreen.vue'
+import DefeatedEnemies from './DefeatedEnemies.vue'
+import ToastNotification from './ToastNotification.vue'
 
 const game = useGameStore()
+const showDefeated = ref(false)
 </script>
 
 <template>
@@ -16,13 +20,28 @@ const game = useGameStore()
       <h1 class="text-base font-bold text-text-primary tracking-tight">
         Regicide
       </h1>
-      <button
-        @click="game.resetGame()"
-        class="text-[10px] text-text-muted hover:text-text-secondary transition-colors
-               px-2 py-0.5 rounded border border-border/50 hover:border-text-muted/50"
-      >
-        Menu
-      </button>
+      <div class="flex items-center gap-1.5">
+        <!-- Undo button -->
+        <button
+          v-if="game.canUndo"
+          @click="game.undo()"
+          class="text-[10px] text-text-muted hover:text-accent transition-colors
+                 px-2 py-0.5 rounded border border-border/50 hover:border-accent/50
+                 flex items-center gap-1"
+          title="Undo last action"
+        >
+          <span class="text-xs">↩</span>
+          Undo
+        </button>
+        <!-- Menu button -->
+        <button
+          @click="game.returnToMenu()"
+          class="text-[10px] text-text-muted hover:text-text-secondary transition-colors
+                 px-2 py-0.5 rounded border border-border/50 hover:border-text-muted/50"
+        >
+          Menu
+        </button>
+      </div>
     </div>
 
     <!-- Deck Stats -->
@@ -30,6 +49,21 @@ const game = useGameStore()
 
     <!-- Enemy -->
     <EnemyDisplay />
+
+    <!-- Defeated enemies toggle + grid -->
+    <div>
+      <button
+        @click="showDefeated = !showDefeated"
+        class="w-full text-[10px] text-text-muted hover:text-text-secondary transition-colors
+               py-1 flex items-center justify-center gap-1"
+      >
+        <span>{{ game.enemiesDefeated }}/12 Defeated</span>
+        <span class="text-[8px]">{{ showDefeated ? '▲' : '▼' }}</span>
+      </button>
+      <Transition name="expand">
+        <DefeatedEnemies v-if="showDefeated" />
+      </Transition>
+    </div>
 
     <!-- Turn Status -->
     <div class="text-center">
@@ -57,6 +91,9 @@ const game = useGameStore()
     <!-- Log -->
     <LogComponent />
 
+    <!-- Toast Notification -->
+    <ToastNotification />
+
     <!-- Game Over Overlay -->
     <Transition name="fade">
       <GameOverScreen v-if="game.phase === 'won' || game.phase === 'lost'" />
@@ -72,5 +109,21 @@ const game = useGameStore()
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.25s ease;
+  overflow: hidden;
+}
+.expand-enter-from,
+.expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+.expand-enter-to,
+.expand-leave-from {
+  opacity: 1;
+  max-height: 500px;
 }
 </style>

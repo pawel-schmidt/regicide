@@ -1,45 +1,43 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useGameStore } from './stores/gameStore'
-import SetupScreen from './components/SetupScreen.vue'
 import GameBoard from './components/GameBoard.vue'
 
 const game = useGameStore()
-const showResume = ref(false)
 const loaded = ref(false)
 
 onMounted(() => {
-  // Check if there's a persisted in-progress game
-  if (game.phase === 'playing') {
-    showResume.value = true
-  }
   loaded.value = true
 })
 
-function resumeGame() {
-  showResume.value = false
-  // Game state is already loaded from persistence, just play
+function continueGame() {
+  // Game state is already loaded from persistence
+  game.phase = 'playing'
 }
 
 function newGame() {
-  showResume.value = false
   game.startNewGame(1)
 }
 
-function startFresh() {
-  game.startNewGame(1)
-}
+const hasActiveGame = computed(() => {
+  // There's an active game if we have a current enemy or defeated enemies and aren't in setup
+  return (
+    game.currentEnemy !== null ||
+    game.defeatedEnemies.length > 0 ||
+    game.playerHand.length > 0
+  )
+})
 
-const showSetup = computed(() => {
+const showMenu = computed(() => {
   if (!loaded.value) return false
-  return game.phase === 'setup' || showResume.value
+  return game.phase === 'setup'
 })
 </script>
 
 <template>
   <div v-if="loaded" class="min-h-dvh bg-bg-primary">
-    <!-- Setup / Resume Screen -->
-    <template v-if="showSetup">
+    <!-- Menu Screen -->
+    <template v-if="showMenu">
       <div class="min-h-dvh flex items-center justify-center p-4">
         <div class="max-w-md w-full text-center space-y-8">
           <div>
@@ -51,35 +49,32 @@ const showSetup = computed(() => {
 
           <div class="text-6xl">👑</div>
 
-          <!-- Resume existing game -->
-          <div v-if="showResume" class="space-y-3">
-            <p class="text-text-secondary text-sm">
-              You have an unfinished game ({{ game.enemiesDefeated }}/12 defeated)
-            </p>
-            <button
-              @click="resumeGame"
-              class="w-full py-3 px-6 bg-accent text-bg-primary font-semibold rounded-lg
-                     hover:bg-accent/90 transition-colors text-lg"
-            >
-              Resume Game
-            </button>
+          <div class="space-y-3">
+            <!-- Continue existing game -->
+            <div v-if="hasActiveGame">
+              <p class="text-text-secondary text-sm mb-3">
+                Game in progress ({{ game.defeatedEnemies.length }}/12 defeated)
+              </p>
+              <button
+                @click="continueGame"
+                class="w-full py-3 px-6 bg-accent text-bg-primary font-semibold rounded-lg
+                       hover:bg-accent/90 transition-colors text-lg"
+              >
+                Continue Game
+              </button>
+            </div>
+
+            <!-- New game -->
             <button
               @click="newGame"
-              class="w-full py-3 px-6 bg-bg-card text-text-primary font-semibold rounded-lg
-                     border border-border hover:bg-bg-hover transition-colors"
+              :class="[
+                'w-full py-3 px-6 font-semibold rounded-lg transition-colors',
+                hasActiveGame
+                  ? 'bg-bg-card text-text-primary border border-border hover:bg-bg-hover'
+                  : 'bg-accent text-bg-primary hover:bg-accent/90 text-lg',
+              ]"
             >
-              New Game
-            </button>
-          </div>
-
-          <!-- Fresh start -->
-          <div v-else class="space-y-3">
-            <button
-              @click="startFresh"
-              class="w-full py-3 px-6 bg-accent text-bg-primary font-semibold rounded-lg
-                     hover:bg-accent/90 transition-colors text-lg"
-            >
-              Start Solo Game
+              {{ hasActiveGame ? 'New Game' : 'Start Solo Game' }}
             </button>
           </div>
 

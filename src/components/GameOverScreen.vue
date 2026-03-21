@@ -1,9 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 
 const game = useGameStore()
 
-const isWin = game.phase === 'won'
+const isWin = computed(() => game.phase === 'won')
+
+const totalCaptured = computed(() => game.defeatedEnemies.filter(d => d.captured).length)
+const totalTurns = computed(() =>
+  game.defeatedEnemies.reduce((acc, d) => acc + d.turnsToDefeat, 0)
+)
 </script>
 
 <template>
@@ -26,18 +32,22 @@ const isWin = game.phase === 'won'
       </div>
 
       <!-- Stats -->
-      <div class="grid grid-cols-3 gap-2 text-center">
+      <div class="grid grid-cols-2 gap-2 text-center">
         <div class="bg-bg-secondary rounded-lg p-2 border border-border/30">
           <div class="text-[10px] text-text-muted uppercase">Defeated</div>
-          <div class="text-lg font-bold text-accent">{{ game.enemiesDefeated }}</div>
+          <div class="text-lg font-bold text-accent">{{ game.enemiesDefeated }}/12</div>
         </div>
         <div class="bg-bg-secondary rounded-lg p-2 border border-border/30">
-          <div class="text-[10px] text-text-muted uppercase">Hand</div>
-          <div class="text-lg font-bold text-text-primary">{{ game.playerHand.length }}</div>
+          <div class="text-[10px] text-text-muted uppercase">Captured</div>
+          <div class="text-lg font-bold text-gold">{{ totalCaptured }}</div>
         </div>
         <div class="bg-bg-secondary rounded-lg p-2 border border-border/30">
-          <div class="text-[10px] text-text-muted uppercase">Tavern</div>
-          <div class="text-lg font-bold text-text-secondary">{{ game.tavernDeck.length }}</div>
+          <div class="text-[10px] text-text-muted uppercase">Total Turns</div>
+          <div class="text-lg font-bold text-text-primary">{{ totalTurns }}</div>
+        </div>
+        <div class="bg-bg-secondary rounded-lg p-2 border border-border/30">
+          <div class="text-[10px] text-text-muted uppercase">Cards Left</div>
+          <div class="text-lg font-bold text-text-secondary">{{ game.playerHand.length }}</div>
         </div>
       </div>
 
