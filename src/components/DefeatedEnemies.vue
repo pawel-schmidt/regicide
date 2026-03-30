@@ -10,14 +10,6 @@ const selectedEnemy = ref<DefeatedEnemy | null>(null)
 
 const ranks: FaceRank[] = ['J', 'Q', 'K']
 
-function rankTitle(rank: FaceRank): string {
-  switch (rank) {
-    case 'J': return 'Jacks'
-    case 'Q': return 'Queens'
-    case 'K': return 'Kings'
-  }
-}
-
 function rankSingular(rank: FaceRank): string {
   switch (rank) {
     case 'J': return 'Jack'

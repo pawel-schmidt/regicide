@@ -77,7 +77,6 @@ describe('gameStore', () => {
 
       const card = store.playerHand[0]
       store.toggleCardSelection(card.id)
-      const initialHealth = store.currentEnemy!.health
 
       store.playSelectedCards()
 

@@ -1,29 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useGameStore } from './gameStore'
-import type { Card, EnemyCard } from '../types'
+import type { Card } from '../types'
 
 beforeEach(() => {
   setActivePinia(createPinia())
 })
 
-/** Helper: find a card in hand by suit */
-function findBySuit(hand: Card[], suit: Card['suit']): Card | undefined {
-  return hand.find(c => c.suit === suit)
-}
-
-/** Helper: find card(s) in hand by value */
-function findByValue(hand: Card[], value: number): Card[] {
-  return hand.filter(c => c.value === value)
-}
-
 describe('integration: full turn sequences', () => {
   it('should complete a full turn: play -> suit power -> damage -> suffer damage', () => {
     const store = useGameStore()
     store.startNewGame(1)
-
-    const enemy = store.currentEnemy!
-    const initialEnemyHealth = enemy.health
 
     // Pick a card from hand
     const card = store.playerHand[0]

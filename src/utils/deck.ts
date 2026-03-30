@@ -1,4 +1,4 @@
-import type { Card, EnemyCard, JesterCard, Suit, NumberRank, FaceRank } from '../types'
+import type { Card, EnemyCard, JesterCard, Suit, FaceRank } from '../types'
 import { SUITS, NUMBER_RANKS, RANK_VALUES, ENEMY_STATS, JESTER_COUNTS } from '../types'
 
 let cardIdCounter = 0
